@@ -152,7 +152,7 @@ void handleRegister(int clientSocket, std::string message) {
                 std::string successMessage = "Registration successful\n";
                 send(clientSocket, successMessage.c_str(), successMessage.size(), 0);
             } else {
-                std::string failureMessage = "Username already exists\n";
+                std::string failureMessage = "REGISTER_FAIL\n";
                 send(clientSocket, failureMessage.c_str(), failureMessage.size(), 0);
             }
         }
