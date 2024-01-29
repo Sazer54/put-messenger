@@ -5,11 +5,14 @@ import sys
 from tkinter import messagebox
 import queue
 import re
+import time
 
 class RegistrationDialog(tk.Toplevel):
     def __init__(self, parent, sockfd):
         super().__init__(parent)
         self.sockfd = sockfd
+        self.queues = Queues()
+        self.reg = 0
 
         self.title("Register")
         self.geometry("400x300")
@@ -32,6 +35,7 @@ class RegistrationDialog(tk.Toplevel):
         self.registerButton.pack(padx=20, pady=10)
 
         self.bind('<Return>', lambda event: self.handleRegister())
+        self.after(100,self.check_queue)
 
     def handleRegister(self):
         username = self.usernameEntry.get()
@@ -43,8 +47,27 @@ class RegistrationDialog(tk.Toplevel):
 
         register_message = f"REGISTER_{username}_{password}"
         self.sockfd.send(register_message.encode())
-        messagebox.showinfo("Registration", "User registered successfully!")
+        if self.check_queue() == 1:
+            messagebox.showinfo("Registration Fail!", "User already exists!")
+            return
+        else:
+        	messagebox.showinfo("Registration", "User registered successfully!")
+        
         self.destroy()
+        
+    def check_queue(self):
+        try:
+            time.sleep(0.1)
+            message = self.queues.general.get_nowait()
+            
+            if message.startswith('REGISTER_FAIL'):
+                return 1
+            else:
+            	return 0
+        except queue.Empty:
+        	pass
+        
+            
 
 class LoginDialog(tk.Toplevel):
     def __init__(self, parent, sockfd):
@@ -154,6 +177,7 @@ class FriendsDialog(tk.Toplevel):
         self.sockfd = sockfd
         self.username = username
         self.queues = Queues()
+        self.openRooms = []
 
         self.geometry("300x500")
 
@@ -213,7 +237,9 @@ class FriendsDialog(tk.Toplevel):
             if message.startswith("ROOMNUMBER"):
                 roomNumber, user1, user2 = message.split('_')[1:4]
                 otherUser = user1 if self.username != user1 else user2
-                RoomMessagesDialog(self, self.sockfd, self.username, roomNumber, otherUser)
+                if roomNumber not in self.openRooms:
+                	RoomMessagesDialog(self, self.sockfd, self.username, roomNumber, otherUser, self)
+                	self.openRooms.append(roomNumber)
             
             elif message.startswith("FRIENDS"):
                 friends = message.split('_')[1].split(',')
@@ -231,13 +257,14 @@ class CustomText(tk.Text):
         self.configure(wrap='word')
 
 class RoomMessagesDialog(tk.Toplevel):
-    def __init__(self, parent, sockfd, username, roomNumber, otherUser):
+    def __init__(self, parent, sockfd, username, roomNumber, otherUser, friendsDialog):
         super().__init__(parent)
         self.sockfd = sockfd
         self.queues = Queues()
         self.username = username
         self.roomNumber = roomNumber
         self.otherUser = otherUser
+        self.friendsDialog = friendsDialog
 
         self.geometry("300x500")
         self.queues.rooms[self.roomNumber] = queue.Queue()
@@ -275,6 +302,7 @@ class RoomMessagesDialog(tk.Toplevel):
     def destroy(self):
         leave_room_message = f"LEAVE_{self.roomNumber}_{self.username}"
         self.sockfd.send(leave_room_message.encode())
+        self.friendsDialog.openRooms.remove(self.roomNumber)
         super().destroy()
 
     def handleSend(self, event=None):
@@ -319,7 +347,7 @@ class RoomMessagesDialog(tk.Toplevel):
                             username = message.split('_', 2)[2]
                             enter_message = f"{username} has entered the chat.\n"
                             self.messagesList.configure(state='normal')
-                            self.messagesList.tag_configure("bold", font=("Arial", 10, "bold"))
+                            self.messagesList.tag_configure("bold", font=("Arial", 10, "bold"))            
                             self.messagesList.insert(tk.END, enter_message, "bold")
                             self.messagesList.configure(state='disabled')
                             self.messagesList.yview(tk.END)
@@ -361,6 +389,8 @@ class ReceiveThread(threading.Thread):
                     self.queues.rooms[roomNumber].put(message)
             else:
                 self.queues.general.put(message)
+                
+	        
 
         self.sockfd.close()
 
@@ -380,7 +410,7 @@ class MyApp(tk.Tk):
         self.sockfd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.queue = queue.Queue()
 
-        serv_addr = ('localhost', 12345)
+        serv_addr = ('150.254.32.134', 12345)
 
         try:
             self.sockfd.connect(serv_addr)
